@@ -260,7 +260,7 @@ class TaskPagesTests(TestCase):
     def test_image_in_index(self):
         """Картинка передается на страницу index"""
         response = self.guest_client.get(reverse("posts:index"))
-        obj = response.context.get("page_obj")[0]
+        obj = response.context.get('page_obj')[0]
         self.assertEqual(obj.image, self.post.image)
 
     def test_image_in_profile(self):
