@@ -257,18 +257,27 @@ class TaskPagesTests(TestCase):
     def setUp(self):
         self.guest_client = Client()
 
-    def test_image_in_index_and_profile_page(self):
-        """Картинка передается на страницу index_and_profile."""
-        templates = (
-            reverse("posts:index"),
-            reverse("posts:profile", kwargs={"username": self.post.author}),
-            reverse("posts:group_list", kwargs={"slug": self.group.slug}),
+    def test_image_in_index(self):
+        """Картинка передается на страницу index"""
+        response = self.guest_client.get(reverse("posts:index"))
+        obj = response.context.get("page_obj")[0]
+        self.assertEqual(obj.image, self.post.image)
+
+    def test_image_in_profile(self):
+        """Картинка передается на страницу profile."""
+        response = self.guest_client.get(
+            reverse("posts:profile", kwargs={"username": self.post.author})
         )
-        for url in templates:
-            with self.subTest(url):
-                response = self.guest_client.get(url)
-                obj = response.context.get("page_obj")[0]
-                self.assertEqual(obj.image, self.post.image)
+        obj = response.context.get("page_obj")[0]
+        self.assertEqual(obj.image, self.post.image)
+
+    def test_image_in_group_list(self):
+        """Картинка передается на страницу group_list."""
+        response = self.guest_client.get(
+            reverse("posts:group_list", kwargs={"slug": self.group.slug})
+        )
+        obj = response.context.get("page_obj")[0]
+        self.assertEqual(obj.image, self.post.image)
 
     def test_image_in_post_detail_page(self):
         """Картинка передается на страницу post_detail."""
