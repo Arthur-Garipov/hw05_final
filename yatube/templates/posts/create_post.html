@@ -1,0 +1,22 @@
+{% extends "base_form.html" %}
+{% block title %}
+{% if is_edit %}
+  Редактировать запись
+{% else %}
+  Добавить запись
+{% endif %}
+{% endblock %}
+{%block header%}
+{% if is_edit %}
+  Редактировать запись
+{% else %}
+  Добавить запись
+{% endif %}
+{% endblock %}
+{% block button_title%}
+{% if is_edit %}
+  Сохранить
+{% else %}
+  Добавить
+{% endif %}
+{% endblock %}
