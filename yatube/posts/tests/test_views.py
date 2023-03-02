@@ -267,7 +267,7 @@ class TaskPagesTests(TestCase):
         for url in templates:
             with self.subTest(url):
                 response = self.guest_client.get(url)
-                obj = response.context["page_obj"][0]
+                obj = response.context.get("page_obj")[0]
                 self.assertEqual(obj.image, self.post.image)
 
     def test_image_in_post_detail_page(self):
