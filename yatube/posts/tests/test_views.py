@@ -256,6 +256,7 @@ class TaskPagesTests(TestCase):
 
     def setUp(self):
         self.guest_client = Client()
+        cache.clear()
 
     def test_image_in_index(self):
         """Картинка передается на страницу index"""
