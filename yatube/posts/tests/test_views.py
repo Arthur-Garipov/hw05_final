@@ -11,13 +11,17 @@ from posts.models import Post, Group, Comment, Follow
 
 User = get_user_model()
 
+TEMP_MEDIA_ROOT = tempfile.mkdtemp(dir=settings.BASE_DIR)
 
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA_ROOT)
 class PostPagesTests(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cache.clear()
-        cls.user = User.objects.create_user(username='auth')
+        cls.user = User.objects.create_user(username='author')
+        cls.user_follow = User.objects.create(username='FollowUser')
         cls.group = Group.objects.create(
             description='Тестовый заголовок',
             title='Тестовый титл',
@@ -28,20 +32,39 @@ class PostPagesTests(TestCase):
             title='Другой тестовый титл',
             slug='test-other-slug',
         )
+        cls.small_gif = (
+            b"\x47\x49\x46\x38\x39\x61\x02\x00"
+            b"\x01\x00\x80\x00\x00\x00\x00\x00"
+            b"\xFF\xFF\xFF\x21\xF9\x04\x00\x00"
+            b"\x00\x00\x00\x2C\x00\x00\x00\x00"
+            b"\x02\x00\x01\x00\x00\x02\x02\x0C"
+            b"\x0A\x00\x3B"
+        )
+        cls.uploaded = SimpleUploadedFile(
+            name="small.gif", content=cls.small_gif, content_type="image/gif"
+        )
         cls.post = Post.objects.create(
             text='Тестовый текст',
             author=cls.user,
-            group=cls.group
+            group=cls.group,
+            image=cls.uploaded
         )
         cls.comment = Comment.objects.create(
             author=cls.user,
             text="Тестовый комментарий",
         )
 
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(TEMP_MEDIA_ROOT, ignore_errors=True)
+
     def setUp(self):
         self.guest_client = Client()
         self.authorized_client = Client()
-        self.authorized_client.force_login(PostPagesTests.user)
+        self.authorized_client.force_login(self.user)
+        self.authorized_client_other = Client()
+        self.authorized_client_other.force_login(self.user_follow)
         cache.clear()
 
     def check_the_object_context_matches(self, post):
@@ -50,6 +73,7 @@ class PostPagesTests(TestCase):
         self.assertEqual(post.text, self.post.text)
         self.assertEqual(post.group, self.post.group)
         self.assertEqual(post.id, self.post.id)
+        self.assertEqual(post.image, self.post.image)
 
     def test_pages_uses_correct_template(self):
         """URL-адрес использует соответствующий шаблон."""
@@ -142,7 +166,8 @@ class PostPagesTests(TestCase):
     def test_comment(self):
         """Проверка появления коммента и валидности формы"""
         comments_count = Comment.objects.count()
-        form_data = {"text": "Тестовый комментарий"}
+        text_com = "Тестовый комментарий"
+        form_data = {"text": text_com}
         response = self.guest_client.post(
             reverse("posts:add_comment", kwargs={"post_id": self.post.pk}),
             data=form_data,
@@ -153,7 +178,7 @@ class PostPagesTests(TestCase):
         )
         self.assertNotEqual(Comment.objects.count(), comments_count + 1)
         self.assertTrue(
-            Comment.objects.filter(text="Тестовый комментарий").exists()
+            Comment.objects.filter(text=text_com).exists()
         )
 
     def test_cache(self):
@@ -167,19 +192,57 @@ class PostPagesTests(TestCase):
         response_3 = self.guest_client.get(reverse('posts:index'))
         self.assertNotEqual(response_2.content, response_3.content)
 
-    def test_following(self):
-        """Проверка работоспособности подписок и правильности отображения"""
-        Follow.objects.get_or_create(user=self.user, author=self.post.author)
-        response = self.authorized_client.get(reverse('posts:follow_index'))
-        self.assertEqual(len(response.context["page_obj"]), 1)
-        self.assertIn(self.post, response.context["page_obj"])
-        other_client = User.objects.create(username="NoName")
-        self.authorized_client.force_login(other_client)
-        response_1 = self.authorized_client.get(reverse("posts:follow_index"))
-        self.assertNotIn(self.post, response_1.context["page_obj"])
-        Follow.objects.all().delete()
-        response_2 = self.authorized_client.get(reverse("posts:follow_index"))
-        self.assertEqual(len(response_2.context["page_obj"]), 0)
+    def test_image_in_post_detail_page(self):
+        """Картинка передается на страницу post_detail."""
+        response = self.guest_client.get(
+            reverse("posts:post_detail", kwargs={"post_id": self.post.id})
+        )
+        obj = response.context["post"]
+        self.assertEqual(obj.image, self.post.image)
+
+    def test_image_in_page(self):
+        """Проверяем что пост с картинкой создается в БД"""
+        self.assertTrue(
+            Post.objects.filter(
+                text="Тестовый текст",
+                image="posts/small.gif").exists()
+        )
+
+    def test_following_and_unfollowing(self):
+        """Проверка работоспособности подписок и отписок"""
+        Follow.objects.count()
+        response = self.authorized_client.get(reverse(
+            'posts:profile_follow', args=(self.user_follow,)))
+        self.assertRedirects(response, reverse(
+            'posts:profile', args=(self.user_follow,)))
+        self.assertEqual(Follow.objects.count(), 1)
+        self.assertTrue(
+            Follow.objects.filter(
+                user=self.user, author=self.user_follow
+            ).exists()
+        )
+        response = self.authorized_client.get(reverse(
+            'posts:profile_unfollow', args=(self.user_follow,)))
+        self.assertRedirects(response, reverse(
+            'posts:profile', args=(self.user_follow,)))
+        self.assertEqual(Follow.objects.count(), 0)
+
+    def test_follower_have_post(self):
+        """У подписчика отображаются посты автора"""
+        self.authorized_client_other.get(reverse(
+            'posts:profile_follow',
+            args=(self.user.username,)))
+        response = self.authorized_client_other.get(reverse(
+            'posts:follow_index'))
+        self.assertEqual(len(response.context['page_obj']), 1)
+        post = response.context.get('page_obj')[0]
+        self.check_the_object_context_matches(post)
+
+    def test_unfollower_have_not_post(self):
+        response = self.authorized_client_other.get(
+            reverse("posts:follow_index")
+        )
+        self.assertNotIn(self.post, response.context["page_obj"])
 
 
 class PaginatorViewsTest(TestCase):
@@ -215,83 +278,3 @@ class PaginatorViewsTest(TestCase):
                 self.assertEqual(len(response.context['page_obj']), 10)
                 response = self.client.get(paginator + '?page=2')
                 self.assertEqual(len(response.context['page_obj']), 3)
-
-
-TEMP_MEDIA_ROOT = tempfile.mkdtemp(dir=settings.BASE_DIR)
-
-
-@override_settings(MEDIA_ROOT=TEMP_MEDIA_ROOT)
-class TaskPagesTests(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super(TaskPagesTests, cls).setUpClass()
-        cls.user = User.objects.create_user(username="HasNoName")
-        cls.group = Group.objects.create(
-            title="Test group",
-            slug="test_group_slug",
-            description="Test group description",
-        )
-        cls.small_gif = (
-            b"\x47\x49\x46\x38\x39\x61\x02\x00"
-            b"\x01\x00\x80\x00\x00\x00\x00\x00"
-            b"\xFF\xFF\xFF\x21\xF9\x04\x00\x00"
-            b"\x00\x00\x00\x2C\x00\x00\x00\x00"
-            b"\x02\x00\x01\x00\x00\x02\x02\x0C"
-            b"\x0A\x00\x3B"
-        )
-        cls.uploaded = SimpleUploadedFile(
-            name="small.gif", content=cls.small_gif, content_type="image/gif"
-        )
-        cls.post = Post.objects.create(
-            author=cls.user,
-            text="Тестовый текст",
-            group=cls.group,
-            image=cls.uploaded
-        )
-
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        shutil.rmtree(TEMP_MEDIA_ROOT, ignore_errors=True)
-
-    def setUp(self):
-        self.guest_client = Client()
-        cache.clear()
-
-    def test_image_in_index(self):
-        """Картинка передается на страницу index"""
-        response = self.guest_client.get(reverse("posts:index"))
-        obj = response.context.get('page_obj')[0]
-        self.assertEqual(obj.image, self.post.image)
-
-    def test_image_in_profile(self):
-        """Картинка передается на страницу profile."""
-        response = self.guest_client.get(
-            reverse("posts:profile", kwargs={"username": self.post.author})
-        )
-        obj = response.context.get("page_obj")[0]
-        self.assertEqual(obj.image, self.post.image)
-
-    def test_image_in_group_list(self):
-        """Картинка передается на страницу group_list."""
-        response = self.guest_client.get(
-            reverse("posts:group_list", kwargs={"slug": self.group.slug})
-        )
-        obj = response.context.get("page_obj")[0]
-        self.assertEqual(obj.image, self.post.image)
-
-    def test_image_in_post_detail_page(self):
-        """Картинка передается на страницу post_detail."""
-        response = self.guest_client.get(
-            reverse("posts:post_detail", kwargs={"post_id": self.post.id})
-        )
-        obj = response.context["post"]
-        self.assertEqual(obj.image, self.post.image)
-
-    def test_image_in_page(self):
-        """Проверяем что пост с картинкой создается в БД"""
-        self.assertTrue(
-            Post.objects.filter(
-                text="Тестовый текст",
-                image="posts/small.gif").exists()
-        )
