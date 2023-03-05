@@ -200,17 +200,8 @@ class PostPagesTests(TestCase):
         obj = response.context["post"]
         self.assertEqual(obj.image, self.post.image)
 
-    def test_image_in_page(self):
-        """Проверяем что пост с картинкой создается в БД"""
-        self.assertTrue(
-            Post.objects.filter(
-                text="Тестовый текст",
-                image="posts/small.gif").exists()
-        )
-
-    def test_following_and_unfollowing(self):
-        """Проверка работоспособности подписок и отписок"""
-        Follow.objects.count()
+    def test_following(self):
+        """Проверка работоспособности подписок"""
         response = self.authorized_client.get(reverse(
             'posts:profile_follow', args=(self.user_follow,)))
         self.assertRedirects(response, reverse(
@@ -221,17 +212,19 @@ class PostPagesTests(TestCase):
                 user=self.user, author=self.user_follow
             ).exists()
         )
-        response = self.authorized_client.get(reverse(
-            'posts:profile_unfollow', args=(self.user_follow,)))
+
+    def test_unfollowing(self):
+        """Проверка работоспособности отписок"""
+        Follow.objects.create(user=self.user_follow, author=self.user)
+        response = self.authorized_client_other.get(reverse(
+            'posts:profile_unfollow', args=(self.user,)))
         self.assertRedirects(response, reverse(
-            'posts:profile', args=(self.user_follow,)))
+            'posts:profile', args=(self.user,)))
         self.assertEqual(Follow.objects.count(), 0)
 
     def test_follower_have_post(self):
         """У подписчика отображаются посты автора"""
-        self.authorized_client_other.get(reverse(
-            'posts:profile_follow',
-            args=(self.user.username,)))
+        Follow.objects.create(user=self.user_follow, author=self.user)
         response = self.authorized_client_other.get(reverse(
             'posts:follow_index'))
         self.assertEqual(len(response.context['page_obj']), 1)
